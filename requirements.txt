@@ -1,0 +1,7 @@
+fastmcp
+pandas
+httpx
+python-dotenv
+sse-starlette
+uvicorn
+websockets

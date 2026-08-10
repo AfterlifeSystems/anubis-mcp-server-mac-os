@@ -1,0 +1,26 @@
+[project]
+name = "neuralnexus-mcp-macos"
+version = "0.1.0"
+description = "Local NeuralNexus MCP filesystem server for macOS (launchd) with outbound relay and API registration"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastmcp",
+  "pandas",
+  "httpx",
+  "python-dotenv",
+  "sse-starlette",
+  "uvicorn",
+  "websockets",
+]
+
+[project.scripts]
+neuralnexus-mcp = "src.daemon.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

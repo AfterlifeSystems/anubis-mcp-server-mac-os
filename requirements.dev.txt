@@ -1,0 +1,6 @@
+ipykernel
+langchain_mcp_adapters
+langsmith[sandbox]
+deepagents
+langchain-openai
+pytest
