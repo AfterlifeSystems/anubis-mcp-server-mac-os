@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import socket
+import sys
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +12,46 @@ from typing import Any
 from urllib.parse import urlparse
 
 DEFAULT_API_BASE_URL = "https://api.neuralnexus.site"
+
+# Canonical platform names the Neural Nexus API records for each machine.
+# ``sys.platform`` reports the interpreter's build target ("linux", "darwin",
+# "win32"), which is not what a person calls their machine, so it is normalized
+# once here rather than at each call site.
+_PLATFORM_BY_SYSTEM_PREFIX = (
+    ("linux", "ubuntu"),
+    ("darwin", "macos"),
+    ("win", "windows"),
+)
+
+
+def detect_platform() -> str:
+    """Canonical platform name for this machine, for the API to record."""
+    system = sys.platform.lower()
+    for prefix, canonical_platform in _PLATFORM_BY_SYSTEM_PREFIX:
+        if system.startswith(prefix):
+            return canonical_platform
+    return "unknown"
+
+
+def detect_device_label() -> str:
+    """Default human-readable name for this machine.
+
+    The hostname is used rather than the platform name because a user may run
+    the daemon on two machines of the SAME platform: "evans-macbook" and
+    "evans-mac-mini" are distinguishable when the avatar reports which machine a
+    file came from, whereas two machines both called "macOS" are not. The API
+    falls back to a platform-derived name when no label is sent, so this is an
+    improvement on that fallback rather than a requirement for connecting.
+    """
+    hostname = ""
+    try:
+        hostname = (socket.gethostname() or "").strip()
+    except OSError:
+        hostname = ""
+    # Drop any domain suffix (macOS hostnames commonly end in ".local") so the
+    # label stays short enough to say out loud in a reply.
+    hostname = hostname.split(".", 1)[0]
+    return hostname or detect_platform()
 
 
 def is_placeholder_api_url(url: str) -> bool:
@@ -71,6 +113,11 @@ class DaemonConfig:
     watched_roots: list[str] = field(default_factory=list)
     device_secret: str | None = None
     device_id: str | None = None
+    # Human-readable name for this machine, announced to the API so the avatar
+    # can say WHICH machine a result came from when several are connected at
+    # once. Persisted so a user who renames the machine keeps the chosen name
+    # across restarts; defaults to the hostname on first run.
+    device_label: str | None = None
     connection_mode: str = "relay"  # relay | local
     public_base_url: str | None = None
     local_port: int = 8000
@@ -115,8 +162,16 @@ class DaemonConfig:
         if not self.device_secret:
             self.device_secret = f"mcp_dev_{secrets.token_urlsafe(32)}"
             changed = True
+        if not self.device_label:
+            self.device_label = detect_device_label()
+            changed = True
         if changed:
             self.save()
+
+    def set_device_label(self, label: str) -> None:
+        """Rename this machine as the avatar refers to it in conversation."""
+        self.device_label = label.strip() or detect_device_label()
+        self.save()
 
     def set_watched_roots(self, roots: list[str]) -> None:
         self.watched_roots = [resolve_existing_directory(root) for root in roots]
@@ -146,6 +201,8 @@ class DaemonConfig:
             "api_base_url": self.api_base_url,
             "connection_mode": self.connection_mode,
             "device_id": self.device_id,
+            "device_label": self.device_label,
+            "platform": detect_platform(),
             "watched_roots": self.watched_roots,
             "public_base_url": self.public_base_url,
             "local_port": self.local_port,

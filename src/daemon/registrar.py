@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from src.daemon.config import DaemonConfig
+from src.daemon.config import DaemonConfig, detect_platform
 from src.daemon.relay import relay_http_url
 from src.server.app import MCP_TRANSPORT
 
@@ -27,6 +27,12 @@ class RegistrationPayload:
     allowed_roots: list[str]
     device_secret: str
     device_id: str
+    # Identity of THIS machine among the several a user may connect at once. The
+    # API derives both fields from ``server_name`` when they are absent, so an
+    # older daemon still connects; sending them explicitly is what lets a user
+    # tell two machines of the same platform apart.
+    device_label: str = ""
+    platform: str = ""
 
     def to_json(self) -> dict[str, Any]:
         payload = {
@@ -40,6 +46,10 @@ class RegistrationPayload:
         }
         if self.discovery_url is not None:
             payload["discovery_url"] = self.discovery_url
+        if self.device_label:
+            payload["device_label"] = self.device_label
+        if self.platform:
+            payload["platform"] = self.platform
         return payload
 
 
@@ -79,6 +89,12 @@ class ApiRegistrar:
                 "device_id": device_id,
                 "mcp_url": mcp_url,
                 "connection_mode": self._config.connection_mode,
+                # Sent on every heartbeat, not only on register, so a machine
+                # the user renames adopts the new name without restarting the
+                # daemon, and so a daemon updated after registering starts
+                # supplying its identity mid-session.
+                "device_label": self._config.device_label or "",
+                "platform": detect_platform(),
             },
         )
         if response.status_code == 404:
@@ -119,6 +135,8 @@ class ApiRegistrar:
                 allowed_roots=list(allowed_roots),
                 device_secret=config.device_secret or "",
                 device_id=device_id,
+                device_label=config.device_label or "",
+                platform=detect_platform(),
             )
 
         base = f"http://127.0.0.1:{config.local_port}"
@@ -132,4 +150,6 @@ class ApiRegistrar:
             allowed_roots=list(allowed_roots),
             device_secret=config.device_secret or "",
             device_id=device_id,
+            device_label=config.device_label or "",
+            platform=detect_platform(),
         )
