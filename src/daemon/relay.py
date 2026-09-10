@@ -13,7 +13,7 @@ import httpx
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-from src.daemon.config import DEFAULT_API_BASE_URL, DaemonConfig
+from src.daemon.config import DEFAULT_API_BASE_URL, DaemonConfig, detect_platform
 from src.server.app import MCP_TRANSPORT
 
 logger = logging.getLogger(__name__)
@@ -82,6 +82,12 @@ class OutboundRelay:
             "transport": MCP_TRANSPORT,
             "allowed_roots": list(self._allowed_roots),
             "local_mcp_url": self._local_mcp_url,
+            # Identity of THIS machine. The API records the label on the live
+            # relay session so a conversation can name which machine a result
+            # came from; without it the API derives a generic name from
+            # ``server_name``, which cannot tell two Macs apart.
+            "device_label": self._config.device_label or "",
+            "platform": detect_platform(),
         }
 
     async def run_until_stopped(self, stop_event: asyncio.Event) -> None:
