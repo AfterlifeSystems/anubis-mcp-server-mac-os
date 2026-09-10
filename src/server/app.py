@@ -16,6 +16,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
+from src.server.history_tools import register_history_tools
 from src.server.settings import ServerSettings, resolve_watched_roots
 
 MCP_TRANSPORT = "streamable_http"
@@ -166,6 +167,13 @@ def create_mcp_server(
             content_b64 = await read_file_bytes(fp)
             results.append({**info, "content_b64": content_b64})
         return results
+
+    # Browsing history: what the owner reads, searches for, and returns to,
+    # from Safari, Chrome, Brave, Edge, Arc, Firefox and the rest. The avatar
+    # analyses it on the API side to learn facts about the owner and how they
+    # think. Read-only; EXPOSE_BROWSER_HISTORY=false switches it off. Reading
+    # Safari's database needs Full Disk Access, and says so when it lacks it.
+    register_history_tools(mcp)
 
     used_resource_names: set[str] = set()
     for root in allowed_roots:
