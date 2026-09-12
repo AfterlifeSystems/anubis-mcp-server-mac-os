@@ -16,7 +16,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
-from src.server.history_tools import register_history_tools
+from src.server import git_tools
 from src.server.settings import ServerSettings, resolve_watched_roots
 
 MCP_TRANSPORT = "streamable_http"
@@ -168,12 +168,66 @@ def create_mcp_server(
             results.append({**info, "content_b64": content_b64})
         return results
 
-    # Browsing history: what the owner reads, searches for, and returns to,
-    # from Safari, Chrome, Brave, Edge, Arc, Firefox and the rest. The avatar
-    # analyses it on the API side to learn facts about the owner and how they
-    # think. Read-only; EXPOSE_BROWSER_HISTORY=false switches it off. Reading
-    # Safari's database needs Full Disk Access, and says so when it lacks it.
-    register_history_tools(mcp)
+    @mcp.tool()
+    async def list_git_repositories() -> dict:
+        """Discover git repositories under the shared folders.
+
+        Returns each repo's path, current branch, whether it has uncommitted
+        changes, and its last commit. Start here before calling
+        git_changes_summary, which needs a repo_path.
+        """
+        if not allowed_roots:
+            raise ResourceError("No shared folders are configured on this device.")
+        return await asyncio.to_thread(git_tools.discover_repositories, allowed_roots)
+
+    @mcp.tool()
+    async def git_changes_summary(
+        repo_path: str,
+        since: str = "24 hours ago",
+        until: str | None = None,
+        max_commits: int = 30,
+        include_uncommitted: bool = True,
+    ) -> dict:
+        """Summarize committed and uncommitted changes in a git repository.
+
+        `since` and `until` accept ISO-8601 timestamps ("2026-08-12T09:00:00")
+        or relative phrases ("24 hours ago", "last monday"). Both are echoed
+        back in the response so the window can be sanity-checked. Prefer this
+        over git_diff for progress updates -- it returns per-commit stats
+        instead of raw patch text.
+        """
+        repo = _resolve_allowed_dir(repo_path, allowed_roots)
+        return await asyncio.to_thread(
+            git_tools.summarize_changes,
+            repo,
+            since,
+            until,
+            max_commits,
+            include_uncommitted,
+        )
+
+    @mcp.tool()
+    async def git_diff(
+        repo_path: str,
+        since: str | None = None,
+        commit: str | None = None,
+        base: str | None = None,
+        head: str | None = None,
+        max_bytes: int = 100_000,
+    ) -> dict:
+        """Return raw git diff text, capped at max_bytes (hard limit 500 KB).
+
+        Pass at most one of `commit` (that commit's patch), `base` (a
+        base..head range, where `head` defaults to HEAD), or `since` (changes
+        after a time point -- ISO-8601 or "24 hours ago"). With none of them
+        you get the uncommitted working-tree diff plus untracked file names.
+        Only reach for this when git_changes_summary was not detailed enough,
+        and keep max_bytes small.
+        """
+        repo = _resolve_allowed_dir(repo_path, allowed_roots)
+        return await asyncio.to_thread(
+            git_tools.get_diff, repo, since, commit, base, head, max_bytes
+        )
 
     used_resource_names: set[str] = set()
     for root in allowed_roots:

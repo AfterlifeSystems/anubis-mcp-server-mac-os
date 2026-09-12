@@ -338,6 +338,39 @@ The local daemon expects these endpoints on the API:
 }
 ```
 
+### MCP tools
+
+| Tool | Purpose |
+|------|---------|
+| `list_all_files(directory, recursive)` | List files under a shared folder |
+| `get_file_info(file_path)` | Size, extension, modified date |
+| `preview_data(file_path, n_rows)` | First rows of a CSV/JSON file |
+| `read_file_bytes(file_path)` | Base64 file contents for sandbox upload |
+| `read_files_for_sandbox(file_paths)` | Info + base64 for several files at once |
+| `list_git_repositories()` | Git repos under the shared folders, with branch, dirty state, last commit |
+| `git_changes_summary(repo_path, since, until, max_commits, include_uncommitted)` | Per-commit and uncommitted change stats over a time window |
+| `git_diff(repo_path, since, commit, base, head, max_bytes)` | Raw diff text: working tree, one commit, a `base..head` range, or a time window |
+
+Every path argument is checked against the shared folders first; anything outside them returns `Path not allowed`.
+
+---
+
+## Git progress summaries
+
+The last three tools let the avatar answer "what have I been working on?" by reading git history directly, instead of waiting for the hourly push.
+
+- **Repos are discovered under your shared folders only.** There is no separate setting — share a folder that contains your projects (see [Share more folders](#share-more-folders)) and the repos inside it are found automatically. The scan goes 3 levels deep, stops at 50 repos, and gives up after 45 seconds; when it hits a limit the response says `truncated: true`.
+- **Access is strictly read-only.** Every call is `git --no-optional-locks` with `GIT_OPTIONAL_LOCKS=0`, limited to `rev-parse`, `symbolic-ref`, `rev-list`, `log`, `status`, `diff`, `show`, and `hash-object`. Nothing is ever committed, checked out, fetched, or written.
+- **Output is capped** so a large repo cannot flood the response: lists carry `truncated` flags and diff text is byte-limited (100 KB by default, 500 KB maximum).
+- **Untracked files are listed by name only** — their contents are never included in a diff.
+- **Linked worktrees and submodules** are reported with `is_worktree: true`. A worktree whose real gitdir lives outside your shared folders is still readable, because the folder you shared is the one being inspected.
+
+If a repo returns a `dubious ownership` / `safe.directory` error, that is git refusing to read a repository owned by another user. It is surfaced as-is rather than worked around; fix it deliberately with:
+
+```bash
+git config --global --add safe.directory /path/to/repo
+```
+
 ---
 
 ## Uninstall
@@ -371,6 +404,8 @@ rm -f ~/Library/LaunchAgents/com.neuralnexus.mcp.dev.plist
 | Service will not start | `./neuralnexus-mcp.sh status` and `./neuralnexus-mcp.sh logs` |
 | Tool calls return permission errors | Grant **Full Disk Access** (see [macOS privacy permissions](#macos-privacy-permissions-tcc)), then `./neuralnexus-mcp.sh restart` |
 | Reading iCloud files hangs or fails | The file is not downloaded yet — open it in Finder, or disable **Optimize Mac Storage** |
+| Git tools report `dubious ownership` | The repo is owned by another user — `git config --global --add safe.directory <path>` (see [Git progress summaries](#git-progress-summaries)) |
+| Git tools report `git is not installed` | Install the Command Line Tools: `xcode-select --install` |
 | Stops when you log out | Expected — a LaunchAgent runs only while you are logged in |
 | `launchctl` errors about the domain | Run from a logged-in macOS session, not a bare SSH shell |
 | Dev vs prod confusion | Prod: `./neuralnexus-mcp.sh` + `.env` + `~/.config/neuralnexus-mcp/` · Dev: `./scripts/dev.sh` + `.env.dev` + `~/.config/neuralnexus-mcp-dev/` |
